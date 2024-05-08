@@ -2,8 +2,12 @@ import torch
 import torchvision
 import torch.nn as nn
 import torch.optim as optim
-from torchvision import transforms, datasets
+from torchvision import transforms, datasets, models
 from torch.utils.data import DataLoader
+from torch.nn.modules.pooling import AdaptiveAvgPool2d
+import timm
+# from swin_transformer import SwinTransformer
+from functools import partial
 
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
@@ -14,16 +18,39 @@ transform = transforms.Compose([
 train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
 test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
 
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
 
 # load pretrained Swin
-model = torch.hub.load('microsoft/Swin-Transformer', 'swin_tiny_patch4_window7_224', pretrained=True, trust_repo=True)
+model = timm.create_model('swin_tiny_patch4_window7_224.ms_in1k', pretrained=True)
+print("Model created")
+print(model)
 
+class ClassifierHead(nn.Module):
+    def __init__(self, in_features, out_features):
+        super(ClassifierHead, self).__init__()
+        self.global_pool = AdaptiveAvgPool2d(output_size=(1, 1))
+        self.drop = nn.Dropout(p=0.0)
+        self.fc = nn.Linear(in_features, out_features)
+        self.flatten = nn.Identity()
+        
+    def forward(self, x):
+        x = x.permute(0, 3, 1, 2)
+        x = self.global_pool(x)
+        x = self.drop(x)
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
+        return x
+# print(f"Number of parameters: {sum(p.numel() for p in model.parameters())}")
+# print(type(model))
+
+# state_dict = torch.load('../pretrained_models/swin_small_patch4_window7_224.pth')
+# model.load_state_dict(state_dict)
 # modify output
 num_classes = 10
 in_features = model.head.in_features
-model.head = nn.Linear(in_features, num_classes)
+model.head = ClassifierHead(in_features, num_classes)
+print("New Head: ", model.head)
 
 # loss and optimizer
 criterion = nn.CrossEntropyLoss()
