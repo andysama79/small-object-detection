@@ -7,3 +7,6 @@
 [submodule "Swin-Transformer-Object-Detection"]
 	path = Swin-Transformer-Object-Detection
 	url = git@github.com:SwinTransformer/Swin-Transformer-Object-Detection.git
+[submodule "Swin-Transformer"]
+	path = Swin-Transformer
+	url = git@github.com:microsoft/Swin-Transformer.git
