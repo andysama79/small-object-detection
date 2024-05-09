@@ -188,24 +188,24 @@ class StageModule(nn.Module):
         return x.permute(0,3,1,2)
 
 class SwinTransformer(nn.Module):
-    def __init__(self, *, hid_dim, layers, heads, channels=3, num_classes=1000, head_dim=32, window_size=7, down_scaling_fact=(4,2,2,2), rel_pos_emb = True):
+    def __init__(self, *, hid_dim, layers, heads, channels=3, num_classes=1000, head_dim=32, window_size=2, down_scaling_fact=(4,2,2,2), rel_pos_emb = True):
       super().__init__()
       self.stage1 = StageModule(in_channel = channels, hid_dim=hid_dim, layers=layers[0], down_scaling_factor=down_scaling_fact[0], num_heads=heads[0], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
       self.stage2 = StageModule(in_channel = hid_dim, hid_dim=hid_dim*2, layers=layers[1], down_scaling_factor=down_scaling_fact[1], num_heads=heads[1], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
       self.stage3 = StageModule(in_channel = hid_dim*2, hid_dim=hid_dim*4, layers=layers[2], down_scaling_factor=down_scaling_fact[2], num_heads=heads[2], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
       self.stage4 = StageModule(in_channel = hid_dim*4, hid_dim=hid_dim*8, layers=layers[3], down_scaling_factor=down_scaling_fact[3], num_heads=heads[3], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
-      self.resize = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(hid_dim*8*63*63, hid_dim*8*64*64)
-        )
+    #   self.resize = nn.Sequential(
+    #         nn.Flatten(),
+    #         nn.Linear(hid_dim*8*63*63, hid_dim*8*64*64)
+    #     )
     
     def forward(self, image):
         x = self.stage1(image)
         x = self.stage2(x)
         x = self.stage3(x)
         x = self.stage4(x)
-        x = self.resize(x)
-        x = einops.rearrange(x, 'b (c h w) -> b c h w', c=768, h=64, w=64)
+        # x = self.resize(x)
+        # x = einops.rearrange(x, 'b (c h w) -> b c h w', c=768, h=64, w=64)
         # x = x.mean(dim=[2,3])
         # return self.mlp_head(x)
         return x
