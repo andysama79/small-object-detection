@@ -24,6 +24,8 @@ transform = transforms.Compose([
 # print("Data loaded")
 
 # load pretrained Swin
+
+#! switch to mmdetection
 model = timm.create_model('swin_tiny_patch4_window7_224.ms_in1k', pretrained=True)
 print("Model created")
 print(model)
