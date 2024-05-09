@@ -1,3 +1,9 @@
 [submodule "mmdetection"]
 	path = mmdetection
 	url = https://github.com/open-mmlab/mmdetection.git
+[submodule "MVA2023SmallObjectDetection4SpottingBirds"]
+	path = MVA2023SmallObjectDetection4SpottingBirds
+	url = git@github.com:IIM-TTIJ/MVA2023SmallObjectDetection4SpottingBirds.git
+[submodule "Swin-Transformer-Object-Detection"]
+	path = Swin-Transformer-Object-Detection
+	url = git@github.com:SwinTransformer/Swin-Transformer-Object-Detection.git
