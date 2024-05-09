@@ -210,5 +210,5 @@ class SwinTransformer(nn.Module):
         # return self.mlp_head(x)
         return x
 
-def swin_t(hid_dim=96, layers=(2, 2, 6, 2), heads=(3, 6, 12, 24), **kwargs):
+def swin_t(hid_dim=96, layers=(2, 2, 2, 2), heads=(3, 6, 12, 24), **kwargs):
     return SwinTransformer(hid_dim=hid_dim, layers=layers, heads=heads, **kwargs)

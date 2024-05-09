@@ -1,126 +1,211 @@
 import torch
-import torchvision
-import torch.nn as nn
-import torch.optim as optim
-from torchvision import transforms, datasets, models
-from torch.utils.data import DataLoader
-from torch.nn.modules.pooling import AdaptiveAvgPool2d
-import timm
-# from swin_transformer import SwinTransformer
-from functools import partial
+import numpy as np
+from torch import nn, einsum
+import torch.nn.functional as F
 
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-])
+import einops
+from einops import rearrange, repeat
 
-# train_dataset = datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-# test_dataset = datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
-
-# train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
-# test_loader = DataLoader(test_dataset, batch_size=8, shuffle=False)
-
-# print("Data loaded")
-
-# load pretrained Swin
-
-#! switch to mmdetection
-model = timm.create_model('swin_tiny_patch4_window7_224.ms_in1k', pretrained=True)
-print("Model created")
-print(model)
-
-# class ClassifierHead(nn.Module):
-    # def __init__(self, in_features, out_features):
-    #     super(ClassifierHead, self).__init__()
-    #     self.global_pool = AdaptiveAvgPool2d(output_size=(1, 1))
-    #     self.drop = nn.Dropout(p=0.0)
-    #     self.fc = nn.Linear(in_features, out_features)
-    #     self.flatten = nn.Identity()
+class FeedForward(nn.Module):
+    def __init__(self, hidden_dim, dim):
+        super(FeedForward, self).__init__()
+        self.network = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(), # activation function - gaussian error linear unit
+            nn.Linear(hidden_dim, dim)
+        )
         
-    # def forward(self, x):
-    #     x = x.permute(0, 3, 1, 2)
-    #     x = self.global_pool(x)
-    #     x = self.drop(x)
-    #     x = torch.flatten(x, 1)
-    #     x = self.fc(x)
-    #     return x
-# print(f"Number of parameters: {sum(p.numel() for p in model.parameters())}")
-# print(type(model))
 
-# state_dict = torch.load('../pretrained_models/swin_small_patch4_window7_224.pth')
-# model.load_state_dict(state_dict)
-# modify output
-num_classes = 10
-in_features = model.head.in_features
-model.head = nn.Linear(in_features, in_features)
-# model.head = ClassifierHead(in_features, num_classes)
-# print("New Head: ", model.head)
-
-# # loss and optimizer
-# criterion = nn.CrossEntropyLoss()
-# optimizer = optim.Adam(model.parameters(), lr=1e-4)
-
-# # train
-# num_epochs = 10
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-# print("...using device: ", device)
-# model.to(device)
-
-# for epoch in range(num_epochs):
-#     model.train()
-#     running_loss = 0.0
-#     correct = 0
-#     total = 0
-
-#     for images, labels in train_loader:
-#         images, labels = images.to(device), labels.to(device)
-
-#         optimizer.zero_grad()
-#         outputs = model(images)
-#         loss = criterion(outputs, labels)
-#         loss.backward()
-#         optimizer.step()
-
-#         running_loss += loss.item()
-#         _, predicted = outputs.max(1)
-#         total += labels.size(0)
-#         correct += predicted.eq(labels).sum().item()
+    def forward(self, x):
+        return self.network(x)
     
-#     train_loss = running_loss / len(train_loader.dataset)
-#     train_acc = 100. * correct / total
+class CyclicShift(nn.Module):
+    def __init__(self, disp):
+        super(CyclicShift, self).__init__()
+        self.disp = disp
 
-#     print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {train_loss:.4f}, Acc: {train_acc:.4f}')
+    def forward(self, x):
+        return torch.roll(x, shifts=(self.disp, self.disp), dims=(1, 2))
+    
+def create_mask(window_size, displacement, upper_lower, left_right):
+    mask = torch.zeros(window_size ** 2, window_size ** 2)
 
-# # evaluation
-# model.eval()
-# correct = 0
-# total = 0
+    if upper_lower:
+        mask[-displacement * window_size:, :-displacement * window_size] = float('-inf')
+        mask[:-displacement * window_size, -displacement * window_size:] = float('-inf')
 
-# with torch.no_grad():
-#     for images, labels in test_loader:
-#         images, labels = images.to(device), labels.to(device)
-#         outputs = model(images)
-#         _, predicted = outputs.max(1)
-#         total += labels.size(0)
-#         correct += predicted.eq(labels).sum().item()
+    if left_right:
+        mask = rearrange(mask, '(h1 w1) (h2 w2) -> h1 w1 h2 w2', h1=window_size, h2=window_size)
+        mask[:, -displacement:, :, :-displacement] = float('-inf')
+        mask[:, :-displacement, :, -displacement:] = float('-inf')
+        mask = rearrange(mask, 'h1 w1 h2 w2 -> (h1 w1) (h2 w2)')
 
-# test_acc = 100. * correct / total
-# print(f'Test Accuracy: {test_acc:.4f}')
+    return mask
 
-import cv2
+def get_rel_dist(window_size):
+    indices = torch.tensor(np.array([[x, y] for x in range(window_size) for y in range(window_size)]))
 
-def preprocess_image(image_path):
-    img = cv2.imread(image_path)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = img.resize((224, 224))
-    img = torch.from_numpy(img).unsqueeze(0)
-    return img
+    dist = indices[None, :, :] - indices[:, None, :]
+    return dist
 
-img = preprocess_image("../assets/annotated_image.jpg")
+class WindowAttention(nn.Module):
+    def __init__(self, dim, num_heads, head_dim, shifted, window_size, rel_pos_emb):
+        super(WindowAttention, self).__init__()
+        # print("WindowAttention")
+        inner_dim = head_dim * num_heads    #will be equal to number of channels sucj as (32*3 = 96 for the first layer)
+        self.num_heads = num_heads
+        self.scale = head_dim ** -0.5   #scale factor for the attention mechanism (1/sqrt(d_k))
+        self.window_size = window_size  #for now, we will keep it as 7
+        self.shifted = shifted
+        self.rel_pos_emb = rel_pos_emb
+        if self.shifted:
+            disp = window_size // 2
+            self.cyclic_shift = CyclicShift(-disp)
+            self.cyclic_shift_rev = CyclicShift(disp)
+        
+            self.top_bottom_mask = nn.Parameter(create_mask(window_size=window_size, displacement=disp, upper_lower=True, left_right=False), requires_grad=False)
+            self.left_right_mask = nn.Parameter(create_mask(window_size=window_size, displacement=disp, upper_lower=False, left_right=True), requires_grad=False)
 
-print(img.shape)
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
+        # self.pos_emb = nn.Parameter(torch.randn(window_size**2, window_size**2))
+        # this is realtive position embedding for the window size
+        if self.rel_pos_emb:
+            self.rel_ind = get_rel_dist(window_size) + window_size - 1
+            self.pos_emb = nn.Parameter(torch.randn(2 * window_size - 1, 2 * window_size - 1))
+        else:
+            self.pos_emb = nn.Parameter(torch.randn(window_size**2, window_size**2))
 
-pred = (model(img))
+        self.to_out = nn.Linear(inner_dim, dim)
 
-print(pred.shape)
+    def forward(self, x, **kwargs):
+        if self.shifted:
+            x = self.cyclic_shift(x)
+
+        batch, n_height, n_width, _, h = *x.shape, self.num_heads
+        qkv = self.to_qkv(x).chunk(3, dim=-1)
+
+        num_window_h = n_height//self.window_size
+        num_window_w = n_width//self.window_size
+
+        q,k,v = map(lambda t: rearrange(t, 'batch (num_window_h w_h) (num_window_w w_w) (h d) -> batch h (num_window_h num_window_w) (w_h w_w) d', h=h, w_h=self.window_size, w_w=self.window_size), qkv)
+
+        # this is a dot product similarity approch
+        # dots = einsum('b h w i d, b h w j d -> b h w i j', q, k) * self.scale
+
+        # A better approch would be use the cosine similarity pointed out in the version 2 of the swin_t paper
+        #  better because : it an be beneficial for object detection tasks when there are many similar objects (e.g., different bird species) that need to be distinguished.
+        
+        self.tau = nn.Parameter(torch.tensor(0.02), requires_grad=True)
+        q = F.normalize(q, p=2, dim=-1)
+        k = F.normalize(k, p=2, dim=-1)
+        
+        dots = einsum('b h w i d, b h w j d -> b h w i j', q, k) / self.tau
+        
+        
+        # here the possition embedding is added to all the rows
+        # dots += self.pos_emb
+        if self.rel_pos_emb:
+            temp1 = self.rel_ind[:,:,0]
+            dots += self.pos_emb[self.rel_ind[:,:,0], self.rel_ind[:,:,1]]
+        else:
+            dots += self.pos_emb
+
+        if self.shifted:
+            #here mask are being added to the last rows be it bpttom or right
+            dots[:,:,-num_window_w:]+=self.top_bottom_mask
+            dots[:,:,num_window_w-1::num_window_w] += self.left_right_mask
+
+        attntion = dots.softmax(dim=-1)
+        out = einsum('b h w i j, b h w j d -> b h w i d', attntion, v)
+        out = rearrange(out, 'b h (num_window_h num_window_w) (w_h w_w) d -> b (num_window_h w_h) (num_window_w w_w) (h d)', h=h, w_h=self.window_size, w_w=self.window_size, num_window_h=num_window_h, num_window_w=num_window_w)
+        out = self.to_out(out)
+
+        if self.shifted:
+            out = self.cyclic_shift_rev(out)
+
+        return out
+    
+class PreNorm(nn.Module):
+    def __init__(self, fn, dim):
+        super(PreNorm, self).__init__()
+        # print("attention block PreNorm")
+        self.norm = nn.LayerNorm(dim)
+        self.fn = fn
+        
+    def forward(self, x, **kwargs):
+        return self.norm(self.fn(x, **kwargs))  #this is different from the paper1 of swin whre the preNorm is applied before the mlp and attention
+
+class Residual(nn.Module):
+    def __init__(self, fn):
+        super(Residual, self).__init__()
+        # print("atten_block Residual")
+        self.fn = fn
+
+    def forward(self, x, **kwargs):
+        return self.fn(x, **kwargs) + x
+    
+class SwinTransformerBlock(nn.Module):
+    def __init__(self, dim, num_heads, head_dim, mlp_dim, shifted,window_size, rel_pos_emb):
+        super(SwinTransformerBlock, self).__init__()
+        # print("Swin_Block")
+        self.attention_block = Residual(PreNorm(WindowAttention(dim=dim, num_heads=num_heads, head_dim=head_dim, shifted=shifted, window_size=window_size, rel_pos_emb=rel_pos_emb), dim))
+        self.mlp_block = Residual(PreNorm(FeedForward(hidden_dim=mlp_dim, dim=dim), dim))
+    
+
+    def forward(self, x):
+        x = self.attention_block(x)
+        x = self.mlp_block(x)
+        return x
+    
+class PatchMerging(nn.Module):
+    def __init__(self, in_channels, out_channels, down_scaling_factor):
+        super(PatchMerging, self).__init__()
+        self.patch_merge = nn.Conv2d(in_channels, out_channels, kernel_size=down_scaling_factor, stride=down_scaling_factor, padding=0)
+
+    def forward(self, x):
+        x = self.patch_merge(x).permute(0, 2, 3, 1)
+        return x
+    
+class StageModule(nn.Module):
+    def __init__(self, in_channel, hid_dim, layers, down_scaling_factor, num_heads, head_dim, window_size, rel_pos_emb):
+        super(StageModule, self).__init__()
+        assert layers % 2 == 0, 'number of layers should be even'
+        self.patch_partition = PatchMerging(in_channels=in_channel, out_channels=hid_dim, down_scaling_factor=down_scaling_factor)
+        self.layers = nn.ModuleList([])
+        for _ in range(layers//2):
+            self.layers.append(nn.ModuleList([
+                SwinTransformerBlock(dim=hid_dim, num_heads=num_heads, head_dim=head_dim, mlp_dim = hid_dim*4, shifted=False ,window_size=window_size, rel_pos_emb=rel_pos_emb),
+                SwinTransformerBlock(dim=hid_dim, num_heads=num_heads, head_dim=head_dim, mlp_dim = hid_dim*4, shifted=True ,window_size=window_size, rel_pos_emb=rel_pos_emb),
+            ]))
+
+    def forward(self, x):
+        x = self.patch_partition(x)
+        for regular, shifted in self.layers:
+            x = regular(x)
+            x = shifted(x)
+        # print("returning from stage module")
+        return x.permute(0,3,1,2)
+
+class SwinTransformer(nn.Module):
+    def __init__(self, *, hid_dim, layers, heads, channels=3, head_dim=32, window_size=2, down_scaling_fact=(4,2,2,2), rel_pos_emb = True):
+      super(SwinTransformer, self).__init__()
+      self.stage1 = StageModule(in_channel = channels, hid_dim=hid_dim, layers=layers[0], down_scaling_factor=down_scaling_fact[0], num_heads=heads[0], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
+      self.stage2 = StageModule(in_channel = hid_dim, hid_dim=hid_dim*2, layers=layers[1], down_scaling_factor=down_scaling_fact[1], num_heads=heads[1], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
+      self.stage3 = StageModule(in_channel = hid_dim*2, hid_dim=hid_dim*4, layers=layers[2], down_scaling_factor=down_scaling_fact[2], num_heads=heads[2], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
+      self.stage4 = StageModule(in_channel = hid_dim*4, hid_dim=hid_dim*8, layers=layers[3], down_scaling_factor=down_scaling_fact[3], num_heads=heads[3], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
+    #   self.resize = nn.Sequential(
+    #         nn.Flatten(),
+    #         nn.Linear(hid_dim*8*63*63, hid_dim*8*64*64)
+    #     )
+      self.features = []
+    
+    def forward(self, image):
+        x = self.stage1(image)
+        x = self.stage2(x)
+        x = self.stage3(x)
+        x = self.stage4(x)
+        # x = self.resize(x)
+        # x = einops.rearrange(x, 'b (c h w) -> b c h w', c=768, h=64, w=64)
+        # x = x.mean(dim=[2,3])
+        # return self.mlp_head(x)
+        return x
