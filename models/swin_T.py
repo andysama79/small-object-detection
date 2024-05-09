@@ -52,7 +52,7 @@ def get_rel_dist(window_size):
 class WindowAttention(nn.Module):
     def __init__(self, dim, num_heads, head_dim, shifted, window_size, rel_pos_emb):
         super().__init__()
-        print("WindowAttention")
+        # print("WindowAttention")
         inner_dim = head_dim * num_heads    #will be equal to number of channels sucj as (32*3 = 96 for the first layer)
         self.num_heads = num_heads
         self.scale = head_dim ** -0.5   #scale factor for the attention mechanism (1/sqrt(d_k))
@@ -129,7 +129,7 @@ class WindowAttention(nn.Module):
 class PreNorm(nn.Module):
     def __init__(self, fn, dim):
         super().__init__()
-        print("attention block PreNorm")
+        # print("attention block PreNorm")
         self.norm = nn.LayerNorm(dim)
         self.fn = fn
         
@@ -139,7 +139,7 @@ class PreNorm(nn.Module):
 class Residual(nn.Module):
     def __init__(self, fn):
         super().__init__()
-        print("atten_block Residual")
+        # print("atten_block Residual")
         self.fn = fn
 
     def forward(self, x, **kwargs):
@@ -148,7 +148,7 @@ class Residual(nn.Module):
 class Swin_Block(nn.Module):
     def __init__(self, dim, num_heads, head_dim, mlp_dim, shifted,window_size, rel_pos_emb):
         super().__init__()
-        print("Swin_Block")
+        # print("Swin_Block")
         self.attention_block = Residual(PreNorm(WindowAttention(dim=dim, num_heads=num_heads, head_dim=head_dim, shifted=shifted, window_size=window_size, rel_pos_emb=rel_pos_emb), dim))
         self.mlp_block = Residual(PreNorm(FeedForward(hidden_dim=mlp_dim, dim=dim), dim))
     
@@ -184,7 +184,7 @@ class StageModule(nn.Module):
         for regular, shifted in self.layers:
             x = regular(x)
             x = shifted(x)
-        print("returning from stage module")
+        # print("returning from stage module")
         return x.permute(0,3,1,2)
 
 class SwinTransformer(nn.Module):
@@ -194,17 +194,18 @@ class SwinTransformer(nn.Module):
       self.stage2 = StageModule(in_channel = hid_dim, hid_dim=hid_dim*2, layers=layers[1], down_scaling_factor=down_scaling_fact[1], num_heads=heads[1], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
       self.stage3 = StageModule(in_channel = hid_dim*2, hid_dim=hid_dim*4, layers=layers[2], down_scaling_factor=down_scaling_fact[2], num_heads=heads[2], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
       self.stage4 = StageModule(in_channel = hid_dim*4, hid_dim=hid_dim*8, layers=layers[3], down_scaling_factor=down_scaling_fact[3], num_heads=heads[3], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
-
-    #   self.mlp_head = nn.Sequential(
-    #         nn.LayerNorm(hid_dim*8),
-    #         nn.Linear(hid_dim*8, num_classes)
-    #     )
+      self.resize = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(hid_dim*8*63*63, hid_dim*8*64*64)
+        )
     
     def forward(self, image):
         x = self.stage1(image)
         x = self.stage2(x)
         x = self.stage3(x)
         x = self.stage4(x)
+        x = self.resize(x)
+        x = einops.rearrange(x, 'b (c h w) -> b c h w', c=768, h=64, w=64)
         # x = x.mean(dim=[2,3])
         # return self.mlp_head(x)
         return x
