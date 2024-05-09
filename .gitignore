@@ -1,5 +1,4 @@
 **/data/**
 **/__pycache__/**
 detectron2/
-MVA2023**/
 pretrained_models/
