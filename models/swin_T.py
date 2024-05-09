@@ -156,7 +156,6 @@ class Swin_Block(nn.Module):
     def forward(self, x):
         x = self.attention_block(x)
         x = self.mlp_block(x)
-        print("returning from swin block")
         return x
         
 class PatchMerging_Conv(nn.Module):
@@ -196,18 +195,19 @@ class SwinTransformer(nn.Module):
       self.stage3 = StageModule(in_channel = hid_dim*2, hid_dim=hid_dim*4, layers=layers[2], down_scaling_factor=down_scaling_fact[2], num_heads=heads[2], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
       self.stage4 = StageModule(in_channel = hid_dim*4, hid_dim=hid_dim*8, layers=layers[3], down_scaling_factor=down_scaling_fact[3], num_heads=heads[3], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
 
-      self.mlp_head = nn.Sequential(
-            nn.LayerNorm(hid_dim*8),
-            nn.Linear(hid_dim*8, num_classes)
-        )
+    #   self.mlp_head = nn.Sequential(
+    #         nn.LayerNorm(hid_dim*8),
+    #         nn.Linear(hid_dim*8, num_classes)
+    #     )
     
     def forward(self, image):
         x = self.stage1(image)
         x = self.stage2(x)
         x = self.stage3(x)
         x = self.stage4(x)
-        x = x.mean(dim=[2,3])
-        return self.mlp_head(x)
+        # x = x.mean(dim=[2,3])
+        # return self.mlp_head(x)
+        return x
 
 def swin_t(hid_dim=96, layers=(2, 2, 6, 2), heads=(3, 6, 12, 24), **kwargs):
     return SwinTransformer(hid_dim=hid_dim, layers=layers, heads=heads, **kwargs)
