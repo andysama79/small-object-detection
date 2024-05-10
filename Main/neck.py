@@ -240,4 +240,4 @@ class Neck(nn.Module):
         self.model = SwinTransformerNeck(hid_dim=hid_dim, layers=layers, heads=heads, **kwargs)
         
     def forward(self, x, feature_maps):
-        return self.model(x.permute(0, 3, 1, 2), feature_maps)
+        return self.model(x.permute(0, 3, 1, 2), feature_maps).permute(0, 2, 1, 3)
