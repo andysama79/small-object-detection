@@ -201,6 +201,7 @@ class StageModule(nn.Module):
             x = shifted(x)
             # print("SWIN", x.shape)
             if self.upsample_bool:
+                # print("here")
                 x = self.up_sample(x.permute(0,3,1,2))
                 # print("UPSAMPLE", x.shape)       
         return x
