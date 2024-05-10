@@ -32,7 +32,7 @@ class FPNBlock(nn.Module):
         x = self.lateral_conv(x)
         # print("X shape: ", x.shape)
         x = x + self.topdown_conv(x)
-        # print("X shape: ", x.shape)
+        # print("X shape: ", x.shape)con
         x = self.upmerge(x)
         x = torch.cat([x, x], dim=3)
         # x = self.upmerge(x)
