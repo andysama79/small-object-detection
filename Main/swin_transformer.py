@@ -198,13 +198,13 @@ class SwinTransformer(nn.Module):
     def forward(self, image):
         feature_maps = []
         x = self.stage1(image)
-        feature_maps.append(x)
+        feature_maps.append(x.permute(0, 3, 2, 1))
         x = self.stage2(x)
-        feature_maps.append(x)
+        feature_maps.append(x.permute(0, 3, 2, 1))
         x = self.stage3(x)
-        feature_maps.append(x)
+        feature_maps.append(x.permute(0, 3, 2, 1))
         x = self.stage4(x)
-        feature_maps.append(x)
+        feature_maps.append(x.permute(0, 3, 2, 1))
         # x = self.resize(x)
         # x = einops.rearrange(x, 'b (c h w) -> b c h w', c=768, h=64, w=64)
         # x = x.mean(dim=[2,3])

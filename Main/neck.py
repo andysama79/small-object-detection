@@ -7,88 +7,6 @@ from torch import einsum
 import einops
 from einops import rearrange, repeat
 
-# from swin_transformer import *
-
-# class UpMerging(nn.Module):
-#     def __init__(self, stride=2):
-#         super(UpMerging, self).__init__()
-#         self.pixel_shuffle = nn.PixelShuffle(stride)
-        
-#     def forward(self, x):
-#         x = self.pixel_shuffle(x)
-#         x = torch.cat((x, x), dim=1)
-#         return x.permute(0, 2, 3, 1)
-    
-# class StageModule(nn.Module):
-#     def __init__(self, in_channel, hid_dim, layers, up_scaling_factor, num_heads, head_dim, window_size, rel_pos_emb, upsample=True):
-#         super(StageModule, self).__init__()
-#         assert layers % 2 == 0, 'number of layers should be even'
-        
-#         self.layers = nn.ModuleList([])
-#         for _ in range(layers//2):
-#             self.layers.append(nn.ModuleList([
-#                 SwinTransformerBlock(dim=in_channel, num_heads=num_heads, head_dim=head_dim, mlp_dim = hid_dim*4, shifted=False ,window_size=window_size, rel_pos_emb=rel_pos_emb),
-#                 SwinTransformerBlock(dim=in_channel, num_heads=num_heads, head_dim=head_dim, mlp_dim = hid_dim*4, shifted=True ,window_size=window_size, rel_pos_emb=rel_pos_emb),
-#             ]))
-
-#         self.up_sample = UpMerging(stride=up_scaling_factor)
-#         self.upsample_bool = upsample
-
-#     def forward(self, x):
-#         # x = self.patch_partition(x)
-#         for regular, shifted in self.layers:
-#             x = regular(x)
-#             x = shifted(x)
-#             # print("SWIN", x.shape)
-#             if self.upsample_bool:
-#                 x = self.up_sample(x.permute(0,3,1,2))
-#                 # print("UPSAMPLE", x.shape)       
-#         return x
-    
-# class SwinTransformerNeck(nn.Module):
-#     def __init__(self, *, hid_dim, layers, heads, channels, num_classes=1, head_dim=32, window_size=2, up_scaling_fact=(4, 2, 2, 2), rel_pos_emb=True, feature_maps):
-#         super(SwinTransformerNeck, self).__init__()
-#         self.stage1 = StageModule(in_channel = channels, hid_dim=hid_dim, layers=layers[0], up_scaling_factor=up_scaling_fact[0], num_heads=heads[0], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
-#         self.stage2 = StageModule(in_channel = channels//(2), hid_dim=hid_dim*2, layers=layers[1], up_scaling_factor=up_scaling_fact[1], num_heads=heads[1], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
-#         self.stage3 = StageModule(in_channel = channels//(2*2), hid_dim=hid_dim*4, layers=layers[2], up_scaling_factor=up_scaling_fact[2], num_heads=heads[2], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
-#         self.stage4 = StageModule(in_channel = channels//(2*2*2), hid_dim=hid_dim*8, layers=layers[3], up_scaling_factor=up_scaling_fact[3], num_heads=heads[3], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb, upsample=False)
-        
-#         self.feature_maps = feature_maps
-    
-#     def forward(self, image):
-#         x = self.stage1(image)
-#         # print("Stage 1", x.shape)
-#         # x = torch.cat((x, x), dim=1)
-#         print("Stage 1", x.shape)
-#         # x = x + self.feature_maps[3].permute(0, 2, 3, 1)
-#         # x = F.layer_norm(x, x.shape[1:])
-        
-#         x = self.stage2(x)
-#         # x = torch.cat((x, x), dim=1)
-#         print("Stage 2", x.shape)
-#         # x = x + self.feature_maps[2].permute(0, 2, 3, 1)
-#         # x = F.layer_norm(x, x.shape[1:])
-        
-#         x = self.stage3(x)
-#         # x = torch.cat((x, x), dim=1)
-#         print("Stage 3", x.shape)
-#         # x = x + self.feature_maps[1].permute(0, 2, 3, 1)
-#         # x = F.layer_norm(x, x.shape[1:])
-        
-#         x = self.stage4(x)
-#         # x = torch.cat((x, x), dim=1)
-#         print("Stage 4", x.shape)
-#         # x = x + self.feature_maps[0].permute(0, 2, 3, 1)
-#         # x = F.layer_norm(x, x.shape[1:])
-#         return x
-        
-# class Neck(nn.Module):
-#     def __init__(self, hid_dim, layers, heads, **kwargs):
-#         super(Neck, self).__init__()
-#         self.model = SwinTransformerNeck(hid_dim=hid_dim, layers=layers, heads=heads, **kwargs)
-        
-#     def forward(self, x):
-#         return self.model(x)
 class FeedForward(nn.Module):
     def __init__(self, hidden_dim, dim):
         super(FeedForward, self).__init__()
@@ -301,16 +219,17 @@ class SwinTransformerNeck(nn.Module):
     #     )
     
     def forward(self, x, feature_maps):
-        x = x + feature_maps[3].permute(0, 2, 3, 1)
+        print(f"Input shape: {x.shape}, Feature map shape: {feature_maps[3].shape}")
+        x = x + feature_maps[3]#.permute(0, 3, 1, 2)
         x = self.stage1(x)
         # print("Exited stage 1")
-        x = x + feature_maps[2].permute(0, 2, 3, 1)
+        x = x + feature_maps[2]#.permute(0, 3, 1, 2)
         x = self.stage2(x)
         # print("Exited stage 2")
-        x = x + feature_maps[1].permute(0, 2, 3, 1)
+        x = x + feature_maps[1]#.permute(0, 3, 1, 2)
         x = self.stage3(x)
         # print("Exited stage 3")
-        x = x + feature_maps[0].permute(0, 2, 3, 1)
+        x = x + feature_maps[0]#.permute(0, 3, 1, 2)
         x = self.stage4(x)
         # print("Exited stage 4")
         return x
@@ -321,4 +240,4 @@ class Neck(nn.Module):
         self.model = SwinTransformerNeck(hid_dim=hid_dim, layers=layers, heads=heads, **kwargs)
         
     def forward(self, x, feature_maps):
-        return self.model(x, feature_maps)
+        return self.model(x.permute(0, 3, 1, 2), feature_maps)
