@@ -1,5 +1,8 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+from torch import einsum
 
 import einops
 from einops import rearrange, repeat
@@ -88,7 +91,7 @@ from einops import rearrange, repeat
 #         return self.model(x)
 class FeedForward(nn.Module):
     def __init__(self, hidden_dim, dim):
-        super().__init__()
+        super(FeedForward, self).__init__()
         self.network = nn.Sequential(
             nn.Linear(dim, hidden_dim),
             nn.GELU(), # activation function - gaussian error linear unit
@@ -101,7 +104,7 @@ class FeedForward(nn.Module):
 
 class CyclicShift(nn.Module):
     def __init__(self, disp):
-        super().__init__()
+        super(CyclicShift, self).__init__()
         self.disp = disp
 
     def forward(self, x):
@@ -130,7 +133,7 @@ def get_rel_dist(window_size):
 
 class WindowAttention(nn.Module):
     def __init__(self, dim, num_heads, head_dim, shifted, window_size, rel_pos_emb):
-        super().__init__()
+        super(WindowAttention, self).__init__()
         # print("WindowAttention")
         inner_dim = head_dim * num_heads    #will be equal to number of channels sucj as (32*3 = 96 for the first layer)
         self.num_heads = num_heads
@@ -176,8 +179,8 @@ class WindowAttention(nn.Module):
         #  better because : it an be beneficial for object detection tasks when there are many similar objects (e.g., different bird species) that need to be distinguished.
         
         self.tau = nn.Parameter(torch.tensor(0.02), requires_grad=True)
-        q = f.normalize(q, p=2, dim=-1)
-        k = f.normalize(k, p=2, dim=-1)
+        q = F.normalize(q, p=2, dim=-1)
+        k = F.normalize(k, p=2, dim=-1)
         
         dots = einsum('b h w i d, b h w j d -> b h w i j', q, k) / self.tau
         
@@ -207,7 +210,7 @@ class WindowAttention(nn.Module):
 
 class PreNorm(nn.Module):
     def __init__(self, fn, dim):
-        super().__init__()
+        super(PreNorm, self).__init__()
         # print("attention block PreNorm")
         self.norm = nn.LayerNorm(dim)
         self.fn = fn
@@ -217,16 +220,16 @@ class PreNorm(nn.Module):
 
 class Residual(nn.Module):
     def __init__(self, fn):
-        super().__init__()
+        super(Residual, self).__init__()
         # print("atten_block Residual")
         self.fn = fn
 
     def forward(self, x, **kwargs):
         return self.fn(x, **kwargs) + x
 
-class Swin_Block(nn.Module):
+class SwinTransformerBlock(nn.Module):
     def __init__(self, dim, num_heads, head_dim, mlp_dim, shifted,window_size, rel_pos_emb):
-        super().__init__()
+        super(SwinTransformerBlock, self).__init__()
         # print("Swin_Block")
         self.attention_block = Residual(PreNorm(WindowAttention(dim=dim, num_heads=num_heads, head_dim=head_dim, shifted=shifted, window_size=window_size, rel_pos_emb=rel_pos_emb), dim))
         self.mlp_block = Residual(PreNorm(FeedForward(hidden_dim=mlp_dim, dim=dim), dim))
@@ -260,14 +263,14 @@ class UpMerging(nn.Module):
 
 class StageModule(nn.Module):
     def __init__(self, in_channel, hid_dim, layers, up_scaling_factor, num_heads, head_dim, window_size, rel_pos_emb, upsample=True):
-        super().__init__()
+        super(StageModule, self).__init__()
         assert layers % 2 == 0, 'number of layers should be even'
         # self.patch_partition = PatchMerging_Conv(in_channels=in_channel, out_channels=hid_dim, down_scaling_factor=up_scaling_factor)
         self.layers = nn.ModuleList([])
         for _ in range(layers//2):
             self.layers.append(nn.ModuleList([
-                Swin_Block(dim=in_channel, num_heads=num_heads, head_dim=head_dim, mlp_dim = hid_dim*4, shifted=False ,window_size=window_size, rel_pos_emb=rel_pos_emb),
-                Swin_Block(dim=in_channel, num_heads=num_heads, head_dim=head_dim, mlp_dim = hid_dim*4, shifted=True ,window_size=window_size, rel_pos_emb=rel_pos_emb),
+                SwinTransformerBlock(dim=in_channel, num_heads=num_heads, head_dim=head_dim, mlp_dim = hid_dim*4, shifted=False ,window_size=window_size, rel_pos_emb=rel_pos_emb),
+                SwinTransformerBlock(dim=in_channel, num_heads=num_heads, head_dim=head_dim, mlp_dim = hid_dim*4, shifted=True ,window_size=window_size, rel_pos_emb=rel_pos_emb),
             ]))
 
         self.up_sample = UpMerging(in_channels=in_channel, up_scaling_factor=up_scaling_factor)
@@ -278,15 +281,15 @@ class StageModule(nn.Module):
         for regular, shifted in self.layers:
             x = regular(x)
             x = shifted(x)
-            print("SWIN", x.shape)
+            # print("SWIN", x.shape)
             if self.upsample_bool:
                 x = self.up_sample(x.permute(0,3,1,2))
-                print("UPSAMPLE", x.shape)       
+                # print("UPSAMPLE", x.shape)       
         return x
 
-class SwinTransformer(nn.Module):
-    def __init__(self, *, hid_dim, layers, heads, channels, num_classes=1, head_dim=32, window_size=2, up_scaling_fact=(4,2,2,2), rel_pos_emb = True):
-      super().__init__()
+class SwinTransformerNeck(nn.Module):
+    def __init__(self, *, hid_dim, layers, heads, channels, num_classes=1, head_dim=32, window_size=2, up_scaling_fact=(4,2,2,2), rel_pos_emb = True, feature_maps):
+      super(SwinTransformerNeck, self).__init__()
       self.stage1 = StageModule(in_channel = channels, hid_dim=hid_dim, layers=layers[0], up_scaling_factor=up_scaling_fact[0], num_heads=heads[0], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
       self.stage2 = StageModule(in_channel = channels//(2), hid_dim=hid_dim*2, layers=layers[1], up_scaling_factor=up_scaling_fact[1], num_heads=heads[1], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
       self.stage3 = StageModule(in_channel = channels//(2*2), hid_dim=hid_dim*4, layers=layers[2], up_scaling_factor=up_scaling_fact[2], num_heads=heads[2], head_dim=head_dim, window_size=window_size, rel_pos_emb=rel_pos_emb)
@@ -296,19 +299,27 @@ class SwinTransformer(nn.Module):
     #         nn.LayerNorm(hid_dim*8),
     #         nn.Linear(hid_dim*8, num_classes)
     #     )
+      self.feature_maps = feature_maps
     
-    def forward(self, image):
-        x = self.stage1(image)
-        print("Exited stage 1")
+    def forward(self, x):
+        x = x + self.feature_maps[3].permute(0, 2, 3, 1)
+        x = self.stage1(x)
+        # print("Exited stage 1")
+        x = x + self.feature_maps[2].permute(0, 2, 3, 1)
         x = self.stage2(x)
-        print("Exited stage 2")
+        # print("Exited stage 2")
+        x = x + self.feature_maps[1].permute(0, 2, 3, 1)
         x = self.stage3(x)
-        print("Exited stage 3")
+        # print("Exited stage 3")
+        x = x + self.feature_maps[0].permute(0, 2, 3, 1)
         x = self.stage4(x)
-        print("Exited stage 4")
+        # print("Exited stage 4")
         return x
 
-class SwinTransformerNeck(nn.Module):
+class Neck(nn.Module):
     def __init__(self, hid_dim, layers, heads, **kwargs):
-        super(SwinTransformerNeck, self).__init__()
-        self.model 
+        super(Neck, self).__init__()
+        self.model = SwinTransformerNeck(hid_dim=hid_dim, layers=layers, heads=heads, **kwargs)
+        
+    def forward(self, x):
+        return self.model(x)
