@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from Main.swin_transformer import SwinTransformer
+from swin_transformer import SwinTransformer
 
 class Backbone(nn.Module):
     def __init__(self, hid_dim, layers, heads, **kwargs):
