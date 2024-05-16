@@ -59,6 +59,8 @@ class SwinFPNNeck(nn.Module):
     #     )
     
     def forward(self, x, feature_maps):
+        feature_maps = [f.permute(0, 2, 1, 3) for f in feature_maps]
+        # print("X shape", x.shape, "Feature maps shape:", feature_maps[0].shape, feature_maps[1].shape, feature_maps[2].shape, feature_maps[3].shape)
         x1 = self.stage1(x + feature_maps[3]) # 384
         x2 = self.fpn1(x + feature_maps[3]) # 384
         # print("X1 shape:", x1.shape, "X2 shape:", x2.shape)

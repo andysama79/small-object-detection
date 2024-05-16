@@ -12,6 +12,6 @@ class Model(torch.nn.Module):
         # features = features.permute(0, 2, 3, 1)
         features = self.neck(features.permute(0, 2, 1, 3), feature_maps)
         # features = features.permute(0, 3, 1, 2)
-        print("features: ", features.shape)
+        # print("features: ", features.shape)
         detection_output = self.head(features.permute(0, 3, 1, 2))
         return detection_output

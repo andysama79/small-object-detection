@@ -220,7 +220,7 @@ class SwinTransformerNeck(nn.Module):
     #     )
     
     def forward(self, x, feature_maps):
-        print(f"Input shape: {x.shape}, Feature map shape: {feature_maps[3].shape}")
+        # print(f"Input shape: {x.shape}, Feature map shape: {feature_maps[3].shape}")
         x = x + feature_maps[3]#.permute(0, 3, 1, 2)
         x = self.stage1(x)
         # print("Exited stage 1")

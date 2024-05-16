@@ -22,7 +22,7 @@ class Head(nn.Module):
         self.sigmoid = nn.Sigmoid()
         
     def forward(self, x):
-        print(x.shape)
+        # print(x.shape)
         print(self.num_classes)
         heatmap = self.conv_heatmap(x)
         width = self.conv_width(x)
